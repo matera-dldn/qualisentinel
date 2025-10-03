@@ -1,6 +1,6 @@
 # QualiSentinel
 
-ste documento fornece todas as instruções necessárias para configurar o ambiente de desenvolvimento e executar o protótipo.
+Este documento fornece todas as instruções necessárias para configurar o ambiente de desenvolvimento e executar o protótipo.
 
 ## Pré-requisitos
 
