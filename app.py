@@ -1,8 +1,23 @@
 import streamlit as st
+from datetime import datetime
 from modules.collector import get_httptrace_data, get_prometheus_metrics
 from modules.analyzer import analyze_metrics
 
 st.title("QualiSentinel - Painel de Diagnóstico")
+
+# -------------------------------------------------------------
+# Controles de Auto Refresh (Sidebar)
+# -------------------------------------------------------------
+st.sidebar.header("Atualização Automática")
+auto_refresh = st.sidebar.checkbox("Habilitar auto refresh", value=True, help="Recarrega a página periodicamente para atualizar métricas.")
+intervalo_seg = st.sidebar.slider("Intervalo (segundos)", min_value=5, max_value=120, value=60, step=5)
+st.sidebar.caption("O refresh usa uma meta tag de reload. Desabilite se estiver digitando algo interativo.")
+
+if auto_refresh:
+    # Meta refresh simples (não depende de componentes externos)
+    st.markdown(f"<meta http-equiv='refresh' content='{intervalo_seg}'>", unsafe_allow_html=True)
+
+st.caption(f"Última atualização: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (intervalo: {intervalo_seg}s{' auto' if auto_refresh else ' manual'})")
 
 # URL base da aplicação-alvo
 TARGET_APP_HOST = "http://localhost"
