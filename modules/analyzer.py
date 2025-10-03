@@ -1,4 +1,8 @@
-def _run_heuristic_analysis(metrics: dict) -> list[str]:
+from typing import List, Dict, Any, Optional
+from .collector import get_thread_dump, get_httptrace_data
+
+
+def _run_heuristic_analysis(metrics: dict) -> List[str]:
     """
     Aplica um conjunto de regras heurísticas para diagnosticar problemas de performance
     com base nas métricas coletadas e retorna uma lista de diagnósticos textuais.
@@ -16,36 +20,84 @@ def _run_heuristic_analysis(metrics: dict) -> list[str]:
         )
         diagnostics.append(suggestion)
 
-    # Heurística 2: Gargalo no Acesso ao Banco de Dados
-    # Se qualquer thread estiver esperando por uma conexão, é um problema crítico.
-    if metrics.get('hikaricp_connections_pending', 0) > 0:
+    # Heurística 2: Gargalo no Acesso ao Banco de Dados + Repositórios mais lentos
+    pending = metrics.get('hikaricp_connections_pending', 0)
+    repo_timings = metrics.get('repository_timings') or []
+    if pending > 0 or repo_timings:
+        top_repos = []
+        if repo_timings:
+            for r in repo_timings[:5]:
+                top_repos.append(
+                    f"`{r['repository']}.{r['method']}` total={r['total_time_seconds']:.4f}s avg={r['avg_time_seconds']:.4f}s max={r['max_time_seconds']:.4f}s calls={r['invocations']}"
+                )
+        repos_text = ("\n**Repositórios mais custosos:**\n- " + "\n- ".join(top_repos)) if top_repos else ""
         suggestion = (
-            "**Diagnóstico de Gargalo Crítico no Banco de Dados:** O pool de conexões com o banco está esgotado! "
-            "Existem requisições ativas esperando para poderem executar queries.\n"
-            "*Sugestão de Boas Práticas:* Esta é a causa mais provável da lentidão geral. Audite métodos com a anotação "
-            "`@Transactional` para garantir que o escopo da transação seja o menor possível. Procure por "
-            "consultas que possam estar causando problemas de `N+1`."
+            "**Diagnóstico de Gargalo de Acesso a Dados:** "
+            + ("Pool de conexões apresenta threads em espera. " if pending > 0 else "")
+            + "Foi detectado custo relevante em chamadas de repositórios Spring Data." + repos_text + "\n"
+            "*Boas Práticas:* Reduza escopos transacionais, avalie índices e normalize queries. Verifique padrões N+1 e prefira fetch joins adequados."
         )
         diagnostics.append(suggestion)
 
     # Heurística 3: Contenção de Threads
     # Um número elevado de threads bloqueadas indica gargalo de concorrência.
     if metrics.get('jvm_threads_states_blocked', 0) > 5:
-        suggestion = (
-            "**Diagnóstico de Contenção de Threads:** Um número significativo de threads está no estado 'blocked', "
-            "indicando que elas estão competindo por recursos compartilhados (locks).\n"
-            "*Sugestão de Boas Práticas:* Investigue seções do código que utilizam `synchronized` ou `ReentrantLock`. "
-            "Considere usar estruturas de dados do pacote `java.util.concurrent` (ex: `ConcurrentHashMap`) "
-            "para reduzir a contenção."
-        )
-        diagnostics.append(suggestion)
+        diagnostics.append("**Sinal de Contenção de Threads:** Threads em estado BLOCKED excedem o limiar.")
 
     if not diagnostics:
         diagnostics.append("Nenhum padrão de problema crítico foi detectado pelas heurísticas automáticas. O sistema parece operar dentro dos parâmetros normais.")
 
     return diagnostics
 
-def analyze_metrics(metrics: dict) -> str:
+def _enrich_with_thread_dump(target_url: str, diagnostics: List[str]) -> None:
+    """Coleta e extrai dados de threads bloqueadas acrescentando contexto ao diagnóstico."""
+    td = get_thread_dump(target_url)
+    if not td or 'threads' not in td:
+        return
+    blocked_details = []
+    for th in td.get('threads', []):
+        try:
+            if th.get('threadState') != 'BLOCKED':
+                continue
+            name = th.get('threadName') or th.get('threadId')
+            stack = th.get('stackTrace') or []
+            # pega até as 2 primeiras frames significativas
+            frames = []
+            for fr in stack[:6]:
+                cls = fr.get('className')
+                meth = fr.get('methodName')
+                line = fr.get('lineNumber')
+                if cls and not cls.startswith('java.') and not cls.startswith('jdk.'):
+                    frames.append(f"{cls}.{meth}:{line}")
+                if len(frames) >= 2:
+                    break
+            if frames:
+                blocked_details.append(f"Thread `{name}` bloqueada em: {' | '.join(frames)}")
+        except Exception:
+            continue
+    if blocked_details:
+        diagnostics.append("**Detalhes de Contenção (Thread Dump):**\n" + "\n".join(f"- {d}" for d in blocked_details))
+
+
+def _enrich_with_httptrace(target_url: str, diagnostics: List[str]) -> None:
+    traces = get_httptrace_data(target_url)
+    if not traces:
+        return
+    slow_samples = []
+    for tr in traces[:10]:
+        try:
+            req = tr.get('request', {})
+            resp = tr.get('response', {})
+            time_taken = tr.get('timeTaken') or tr.get('timeTakenMs') or 0
+            if time_taken and time_taken > 500:  # >500ms
+                slow_samples.append(f"{req.get('method')} {req.get('uri')} -> {resp.get('status')} {time_taken}ms")
+        except Exception:
+            continue
+    if slow_samples:
+        diagnostics.append("**HTTP Traces Lentos (amostras):**\n" + "\n".join(f"- {s}" for s in slow_samples))
+
+
+def analyze_metrics(metrics: dict, target_url: Optional[str] = None) -> str:
     """
     Ponto de entrada do Módulo Analisador.
     Executa a análise heurística e formata um prompt completo e contextualizado
@@ -55,6 +107,14 @@ def analyze_metrics(metrics: dict) -> str:
         return "## Análise QualiSentinel\n\nNão foi possível gerar a análise pois não há métricas disponíveis."
 
     diagnostics = _run_heuristic_analysis(metrics)
+
+    # Enriquecimento Nível 2: Thread dump se contenção detectada
+    if any('Contenção' in d or 'Thread' in d for d in diagnostics) and target_url:
+        _enrich_with_thread_dump(target_url, diagnostics)
+
+    # Enriquecimento Nível 3: HTTP trace (se disponível) - apenas se já temos URL
+    if target_url:
+        _enrich_with_httptrace(target_url, diagnostics)
     
     # Montagem do prompt final para o Gemini
     prompt_header = "## Análise de Performance QualiSentinel\n\n"
@@ -75,6 +135,6 @@ def analyze_metrics(metrics: dict) -> str:
         f"- Threads Bloqueadas: **{int(metrics.get('jvm_threads_states_blocked', 0))}**\n\n"
     )
     
-    formatted_diagnostics = "**Diagnósticos Automáticos (Heurísticas):**\n" + "\n\n".join(diagnostics)
+    formatted_diagnostics = "**Diagnósticos e Correlações:**\n" + "\n\n".join(diagnostics)
     
     return prompt_header + prompt_context + formatted_metrics + formatted_diagnostics

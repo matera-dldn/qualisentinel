@@ -1,4 +1,6 @@
 import requests
+import re
+from typing import List, Dict, Any, Optional
 
 def get_httptrace_data(target_url: str):
     """
@@ -82,7 +84,12 @@ def get_prometheus_metrics(target_url: str):
             'hikaricp_connections_timeout_total': 0.0,
             'jvm_threads_states_blocked': 0.0,
             'logback_events_error_total': 0.0,
+            # Novo: timings de repositórios Spring Data
+            'repository_timings': []
         }
+        # Acumuladores temporários para métricas de repositório
+        repo_acc: Dict[str, Dict[str, float]] = {}
+        repo_pattern = re.compile(r'^spring_data_repository_invocations_seconds_(sum|count|max)\{([^}]*)\}')
         lines = response.text.split('\n')
 
         for line in lines:
@@ -94,7 +101,36 @@ def get_prometheus_metrics(target_url: str):
                 metric_name = parts[0]
                 value = float(parts[-1])
 
-                # Mapeamento robusto de métricas-chave para a nossa estrutura
+                # Parsing específico para métricas de repositório Spring Data
+                m = repo_pattern.match(metric_name)
+                if m:
+                    kind = m.group(1)  # sum | count | max
+                    labels_raw = m.group(2)
+                    labels = {}
+                    for pair in labels_raw.split(','):
+                        if '=' in pair:
+                            k, v = pair.split('=', 1)
+                            labels[k.strip()] = v.strip().strip('"')
+                    repo = labels.get('repository') or labels.get('repo') or 'unknown'
+                    method = labels.get('method') or 'unknown'
+                    key = f"{repo}:{method}"
+                    entry = repo_acc.setdefault(key, {
+                        'repository': repo,
+                        'method': method,
+                        'sum': 0.0,
+                        'count': 0.0,
+                        'max': 0.0,
+                    })
+                    if kind == 'sum':
+                        entry['sum'] += value
+                    elif kind == 'count':
+                        entry['count'] += value
+                    elif kind == 'max' and value > entry['max']:
+                        entry['max'] = value
+                    # Próxima linha
+                    continue
+
+                # Mapeamento robusto de outras métricas-chave para a nossa estrutura
                 if 'jvm_memory_used_bytes' in metric_name:
                     metrics['jvm_memory_used_bytes'] += value
                 elif 'system_cpu_usage' in metric_name:
@@ -123,7 +159,45 @@ def get_prometheus_metrics(target_url: str):
             except (ValueError, IndexError):
                 continue
         
+        # Finaliza lista de repository_timings
+        if repo_acc:
+            repo_list = []
+            for entry in repo_acc.values():
+                count = entry['count'] or 0.0
+                avg = entry['sum'] / count if count > 0 else 0.0
+                repo_list.append({
+                    'repository': entry['repository'],
+                    'method': entry['method'],
+                    'total_time_seconds': entry['sum'],
+                    'invocations': int(count),
+                    'avg_time_seconds': avg,
+                    'max_time_seconds': entry['max'],
+                })
+            # Ordena por total_time desc para facilitar heurística
+            repo_list.sort(key=lambda r: r['total_time_seconds'], reverse=True)
+            metrics['repository_timings'] = repo_list
+
         return metrics
     except requests.exceptions.RequestException as e:
         print(f"Erro ao conectar com a aplicação-alvo: {e}")
+        return None
+
+
+def get_thread_dump(target_url: str) -> Optional[Dict[str, Any]]:
+    """Coleta o thread dump via /actuator/threaddump.
+
+    Retorna o JSON (dict) ou None em caso de falha.
+    """
+    url = f"{target_url}/actuator/threaddump"
+    try:
+        resp = requests.get(url, timeout=5)
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return resp.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Falha ao coletar thread dump: {e}")
+        return None
+    except ValueError:
+        print("Resposta de thread dump não era JSON válido")
         return None

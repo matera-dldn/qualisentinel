@@ -49,8 +49,25 @@ col2.metric("Memória JVM Utilizada", f"{mem_used_mb:.2f} MB")
 col3.metric("Threads Bloqueadas", f"{threads_blocked}", help="Threads esperando por locks")
 col4.metric("Threads na Fila do DB", f"{db_pending}", help="Threads esperando por uma conexão com o banco. > 0 é crítico.")
 
+# --- INSERÇÃO DO NOVO BLOCO AQUI ---
+# Este bloco adiciona um menu expansível para mostrar os dados que sustentam a análise.
+with st.expander("Ver detalhes das métricas e evidências coletadas"):
+    st.subheader("Timings de Repositórios Spring Data (Top 5 Mais Lentos)")
+    repo_data = prometheus_data.get('repository_timings', [])
+    if repo_data:
+        # Exibindo um dataframe formatado com os dados do repositório
+        st.dataframe(repo_data[:5])
+    else:
+        st.info("Nenhuma métrica de repositório foi coletada.")
+
+    st.subheader("Todas as Métricas (Dados Brutos)")
+    st.json(prometheus_data)
+# --- FIM DO NOVO BLOCO ---
+
+
 # --- Módulo de Análise ---
 st.header("Análise e Diagnóstico QualiSentinel")
 with st.spinner('Analisando métricas e aplicando heurísticas...'):
-    analysis_result = analyze_metrics(prometheus_data)
+    # Passando a management_url para o analyzer poder fazer a investigação ativa
+    analysis_result = analyze_metrics(prometheus_data, management_url)
     st.markdown(analysis_result, unsafe_allow_html=True)
