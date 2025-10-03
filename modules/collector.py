@@ -85,7 +85,7 @@ def get_prometheus_metrics(target_url: str):
             try:
                 parts = line.split()
                 metric_name = parts[0]
-                value = float(parts[-1]) # O valor é SEMPRE o último elemento
+                value = float(parts[-1])
 
                 # Agora, verificamos o nome da métrica e agregamos os valores
                 if 'jvm_memory_used_bytes' in metric_name:
