@@ -62,51 +62,50 @@ pip install -r requirements.txt
 
 Pronto! Seu ambiente de desenvolvimento está configurado e pronto para uso.
 
+
 ## 2. Instruções de Execução
 
-Com o ambiente preparado e ativo, siga as instruções abaixo para executar o protótipo.
+Com o ambiente preparado e ativo, rode a interface web baseada em Streamlit com o comando abaixo.
 
-### **Opção A: Para um script de linha de comando (CLI)**
-
-Execute o arquivo principal do projeto:
+1. Inicie a aplicação Streamlit:
 
 ```bash
-python3 main.py
-```
-### **Opção B: Para uma aplicação web (Flask, Django, etc.)**
-
-**1. Configure as variáveis de ambiente (se necessário):**
-```bash
-# No macOS ou Linux
-export FLASK_APP=app.py
-export FLASK_ENV=development
-
-# No Windows (CMD)
-set FLASK_APP=app.py
-set FLASK_ENV=development
+streamlit run app.py
 ```
 
-**2. Inicie o servidor de desenvolvimento:**
-```bash
-flask run
-```
-```bash
-python manage.py runserver
-```
-
-Após iniciar, acesse a aplicação no seu navegador em `http://127.0.0.1:5000` (ou a porta informada no terminal).
-
-### **Opção C: Para executar os testes automatizados**
-
-Para garantir que tudo está funcionando corretamente, você pode rodar a suíte de testes do projeto com o comando:
+2. (Opcional) Para escolher uma porta diferente ou outras opções do servidor:
 
 ```bash
-# Exemplo usando pytest
-pytest
+streamlit run app.py --server.port 8501
 ```
+
+3. Após o comando acima abrir, acesse a interface no seu navegador em `http://localhost:8501` (ou na porta indicada).
+
+Notas:
+- Este repositório usa Streamlit para o frontend e exibição de métricas. Os passos acima são suficientes para iniciar a aplicação.
+- Se o comando `streamlit` não existir no ambiente, instale o pacote com `pip install streamlit` ou verifique o `requirements.txt`.
+
+Executando com o helper script `run.sh` (opcional):
+
+Se preferir um comando único que ativa o `venv` e inicia o Streamlit, use o script `run.sh` que vem na raiz do projeto.
+
+```bash
+# Torna o script executável (apenas na primeira vez):
+chmod +x run.sh
+
+# Executa com a porta padrão (8501):
+./run.sh
+
+# Executa em outra porta (ex.: 8888):
+STREAMLIT_PORT=8888 ./run.sh
+```
+
+Observação: o `run.sh` pressupõe que o ambiente virtual está em `./venv`. Se o `venv` não existir, crie com `python3 -m venv venv` e instale as dependências.
 
 ---
 
-## (Opcional) Autores
+## Autores
 
-* **[Seu Nome]** - ([seu-email@exemplo.com](mailto:seu-email@exemplo.com))
+* **[Davi Lima]** - ([davi.neves@matera.com](mailto:davi.neves@matera.com))
+* **[Vitor Carvalho]** - ([vitor.carvalho@matera.com](mailto:vitor.carvalho@matera.com))
+* **[Arthur Ueta]** - ([arthur.ueta@matera.com](mailto:arthur.ueta@matera.com))
