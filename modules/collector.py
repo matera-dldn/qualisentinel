@@ -62,23 +62,30 @@ def get_httptrace_data(target_url: str):
 
 def get_prometheus_metrics(target_url: str):
     """
-    Busca e parseia as métricas do endpoint /actuator/prometheus de forma robusta.
-    Retorna um dicionário com métricas-chave agregadas.
+    Busca e parseia um conjunto expandido de métricas do endpoint /actuator/prometheus,
+    focando em dados que permitem um diagnóstico profundo de performance.
     """
     try:
-        response = requests.get(f"{target_url}/actuator/prometheus")
+        response = requests.get(f"{target_url}/actuator/prometheus", timeout=5)
         response.raise_for_status()
 
+        # Estrutura de dados expandida para métricas de diagnóstico
         metrics = {
-            'jvm_memory_used_bytes': 0.0,  # Inicializamos para poder somar
+            'jvm_memory_used_bytes': 0.0,
             'system_cpu_usage': 0.0,
             'http_server_requests_seconds_count': 0,
             'http_server_requests_seconds_max': 0.0,
+            'jvm_gc_pause_seconds_count': 0,
+            'jvm_gc_pause_seconds_sum': 0.0,
+            'hikaricp_connections_active': 0.0,
+            'hikaricp_connections_pending': 0.0,
+            'hikaricp_connections_timeout_total': 0.0,
+            'jvm_threads_states_blocked': 0.0,
+            'logback_events_error_total': 0.0,
         }
         lines = response.text.split('\n')
 
         for line in lines:
-            # Ignorar linhas que não são dados de métricas
             if line.startswith('#') or not line.strip():
                 continue
 
@@ -87,23 +94,33 @@ def get_prometheus_metrics(target_url: str):
                 metric_name = parts[0]
                 value = float(parts[-1])
 
-                # Agora, verificamos o nome da métrica e agregamos os valores
+                # Mapeamento robusto de métricas-chave para a nossa estrutura
                 if 'jvm_memory_used_bytes' in metric_name:
                     metrics['jvm_memory_used_bytes'] += value
-
                 elif 'system_cpu_usage' in metric_name:
-                    metrics['system_cpu_usage'] = value # Este valor é único
-
+                    metrics['system_cpu_usage'] = value
                 elif 'http_server_requests_seconds_count' in metric_name:
                     metrics['http_server_requests_seconds_count'] += int(value)
+                elif 'http_server_requests_seconds_max' in metric_name and value > metrics['http_server_requests_seconds_max']:
+                    metrics['http_server_requests_seconds_max'] = value
                 
-                elif 'http_server_requests_seconds_max' in metric_name:
-                    # Queremos o tempo máximo entre todos os endpoints
-                    if value > metrics['http_server_requests_seconds_max']:
-                        metrics['http_server_requests_seconds_max'] = value
+                # Coleta das novas métricas de diagnóstico
+                elif 'jvm_gc_pause_seconds_count' in metric_name:
+                    metrics['jvm_gc_pause_seconds_count'] += int(value)
+                elif 'jvm_gc_pause_seconds_sum' in metric_name:
+                    metrics['jvm_gc_pause_seconds_sum'] += value
+                elif 'hikaricp_connections_active' in metric_name:
+                    metrics['hikaricp_connections_active'] = value
+                elif 'hikaricp_connections_pending' in metric_name:
+                    metrics['hikaricp_connections_pending'] = value
+                elif 'hikaricp_connections_timeout_total' in metric_name:
+                    metrics['hikaricp_connections_timeout_total'] += int(value)
+                elif 'jvm_threads_states_threads' in metric_name and 'state="blocked"' in metric_name:
+                    metrics['jvm_threads_states_blocked'] = value
+                elif 'logback_events_total' in metric_name and 'level="error"' in metric_name:
+                    metrics['logback_events_error_total'] += int(value)
 
             except (ValueError, IndexError):
-                # Se uma linha não tiver o formato esperado, a ignoramos
                 continue
         
         return metrics
