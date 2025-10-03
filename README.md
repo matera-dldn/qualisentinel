@@ -84,6 +84,7 @@ streamlit run app.py --server.port 8501
 Notas:
 - Este repositório usa Streamlit para o frontend e exibição de métricas. Os passos acima são suficientes para iniciar a aplicação.
 - Se o comando `streamlit` não existir no ambiente, instale o pacote com `pip install streamlit` ou verifique o `requirements.txt`.
+- É importante que o Prometheus e HttpTrace estejam expostos na aplicação-alvo.
 
 Executando com o helper script `run.sh` (opcional):
 
